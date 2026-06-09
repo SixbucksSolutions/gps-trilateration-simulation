@@ -5,6 +5,7 @@ import time
 import typing
 
 import numpy
+import numpy.linalg
 import numpy.typing
 import pymap3d
 
