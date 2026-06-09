@@ -76,8 +76,21 @@ def _main() -> None:
         args.receiver_clock_bias, satellite_positions, args.ionosphere_delay_seconds,
         args.troposphere_delay_seconds)
 
+
     print()
     print(f"Receiver-measured pseudoranges")
+    print()
+
+    if args.ionosphere_delay_seconds is not None:
+        print(f"\tUsed fixed ionospheric propagation delay of {args.ionosphere_delay_seconds:.09f}")
+    else:
+        print("\tUsed random per-satellite ionospheric propagation delay values")
+
+    if args.troposphere_delay_seconds is not None:
+        print(f"\tUsed fixed tropospheric propagation delay of {args.troposphere_delay_seconds:.09f}")
+    else:
+        print("\tUsed random per-satellite tropospheric propagation delay values")
+
     print()
     print(f"\tPRN  Pseudorange (m)")
     print(f"\t---  ---------------")
@@ -158,8 +171,18 @@ def _main() -> None:
     print()
     print(f"\tTime")
     print(f"\n\t\tReceiver clock offset/bias: {computed_bias_seconds:.06f} s")
-    print()
 
+    fix_error_position_meters: float = trilateration_setup.fix_error_position_meters(computed_pos)
+    # print(f"{args.receiver_clock_bias} / {computed_bias_seconds}")
+    fix_error_receiver_clock_offset_seconds: float = abs(computed_bias_seconds - args.receiver_clock_bias)
+
+    print()
+    print()
+    print(f"Fix error (cumulative)")
+    print(f"\n\t             Position : {fix_error_position_meters:5.1f} m")
+    print(  f"\tReceiver clock offset : {fix_error_receiver_clock_offset_seconds:13.09f} s")
+
+    print()
 
 if __name__ == "__main__":
     _main()

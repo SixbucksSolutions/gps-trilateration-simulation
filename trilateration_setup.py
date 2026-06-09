@@ -80,3 +80,7 @@ def satellite_pseudoranges(clock_bias_seconds: float,
                                                        clock_bias_meters)
 
     return raw_measured_pseudoranges
+
+
+def fix_error_position_meters(fix_position: numpy.typing.NDArray) -> float:
+    return float(numpy.linalg.norm(_actual_receiver_ecef_pos - fix_position))
