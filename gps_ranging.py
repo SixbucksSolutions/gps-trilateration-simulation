@@ -92,29 +92,25 @@ def _svn_prn_stream(args: argparse.Namespace,
 
     full_over_the_air_transmission_delay_seconds: float = computed_pseudorange / SPEED_OF_LIGHT_M_PER_S
     # _logger.debug(f"OTA delay for SVN {svn_num:02d}: {full_over_the_air_transmission_delay_seconds:5.03f} s")
-    transmission_delay_offset_bits: int = int(full_over_the_air_transmission_delay_seconds * PRN_RATE_BITS_PER_MS)
+    transmission_delay_offset_bits: int = math.ceil((1023*1000) *
+                                                    full_over_the_air_transmission_delay_seconds) % 1_023
 
-    # Shift stream by offset into millisecond that receiver starts listening
-    period_offset_bits: int = int((float(args.prn_period_offset_milliseconds) / 1_000.0) *
-                                  PRN_RATE_BITS_PER_MS)
-
-    total_code_shift_bits: int = transmission_delay_offset_bits + period_offset_bits
-    _logger.debug(f"Total code shift for PRN stream: {total_code_shift_bits:5,} "
-                  f"({transmission_delay_offset_bits:3d} OTA + {period_offset_bits:5,} period offset)")
+    _logger.debug(f"Code shift for PRN stream: {transmission_delay_offset_bits:5,} bits")
 
     # raise NotImplementedError("Not a thing yet")
 
     # Modulo so we have less iterations if it went over 1,023
     shifted_code: numpy.typing.NDArray[numpy.int8] = numpy.roll(fix_svn_prns[svn_num],
-                                                                -(total_code_shift_bits % len(fix_svn_prns[svn_num])))
+                                                                -(transmission_delay_offset_bits
+                                                                  % len(fix_svn_prns[svn_num])))
 
     return shifted_code
 
 
-def _pseudorange_by_received_prn_stream(args: argparse.Namespace,
+def _pseudorange_by_received_prn_stream_bits(args: argparse.Namespace,
                                   svn_num: int,
                                   fix_svn_prns: dict[int, numpy.typing.NDArray[numpy.int8]],
-                                  gold_code: numpy.typing.NDArray[numpy.int8]) -> float:
+                                  gold_code: numpy.typing.NDArray[numpy.int8]) -> int:
     sniffed_prn_stream: numpy.typing.NDArray[numpy.int8] = _svn_prn_stream(args, svn_num, fix_svn_prns)
 
     # Find code shift to line up
@@ -129,6 +125,8 @@ def _pseudorange_by_received_prn_stream(args: argparse.Namespace,
         raise RuntimeError("Tried 1,023 shifts and did not line up!")
 
     _logger.debug(f"Got alignment on sniffed PRN stream and gold code at shift #{bits_shifted_to_align:5,}")
+
+    return bits_shifted_to_align
 
 
 def _main() -> None:
@@ -146,10 +144,11 @@ def _main() -> None:
 
     print()
     print("\"Listening\" to PRN stream from our four satellites for one full PRN repetitions (1 ms)")
+    pseudorange_in_bits_per_svn: dict[int, int] = {}
     for svn_num in (2, 7, 13, 19):
-        pseudorange_in_meters: float = _pseudorange_by_received_prn_stream(args, svn_num, fix_svn_prns,
-                                                                           fix_svn_prns[svn_num])
-
+        pseudorange_in_bits: int = _pseudorange_by_received_prn_stream_bits(args, svn_num, fix_svn_prns,
+                                                                            fix_svn_prns[svn_num])
+        pseudorange_in_bits_per_svn[svn_num] = pseudorange_in_bits
 
 
     print("\tDone!")
