@@ -5,32 +5,11 @@ import numpy.linalg
 import numpy.typing
 
 
-SPEED_OF_LIGHT_M_PER_S: float = 299_792_458.0
 
-# This is only used to compute initial pseudorange, need to calculate actual signal propagation delay
-#   for pseudoranges -- never exposed outside of this file
-_actual_receiver_ecef_pos: numpy.typing.NDArray = numpy.array(
-    [
-         1_088_598.0,
-        -4_853_018.0,
-         3_979_796.0,
-    ]
-)
+
 
 satellite_prn_numbers: list[str] = ["02", "07", "13", "19"]
 
-# 3D ECEF positions of 4 GPS satellites all visible from Fairfax County, Virginia, USA
-# at 2026-06-01 00:00:00Z (units: meters)
-#
-# These represent known coordinates extracted from the satellite ephemeris data
-_satellite_positions: numpy.typing.NDArray = numpy.array(
-    [
-        [12_450_000.000, -18_340_000.000,  16_120_000.000],     # PRN 02
-        [-8_420_000.000, -22_110_000.000,  11_430_000.000],     # PRN 07
-        [ 5_120_000.000, -24_150_000.000,  -8_210_000.000],     # PRN 13
-        [15_430_000.000, -11_240_000.000, -17_210_000.000],     # PRN 19
-    ]
-)
 
 
 def satellite_ecef_positions() -> numpy.typing.NDArray:
