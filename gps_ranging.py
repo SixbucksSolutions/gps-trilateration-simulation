@@ -14,7 +14,7 @@ import numpy.typing
 import gps_gold_codes
 import gps_ephemeris
 import gps_receiver
-from trilateration_setup import satellite_pseudoranges
+import sim_time
 
 _logger = logging.getLogger("gps_ranging")
 _logger.setLevel(logging.DEBUG)
@@ -36,12 +36,6 @@ MIN_VALID_PSEUDORANGE: dict[str, float] = {
 MICROSECONDS_PER_SECOND: int = 1_000_000
 
 _hidden_pseudoranges: dict[int, float] = {}
-
-simulation_start_gps_time_at_receiver: datetime.datetime = datetime.datetime.fromisoformat(
-    "2026-06-01T00:00:01.000000")
-
-simulation_current_gps_time_at_receiver: datetime.datetime = datetime.datetime.fromisoformat(
-    "2026-06-01T00:00:01.000000")
 
 
 def compute_pseudorange_from_receiver_to_svn_meters(svn_num: int,
@@ -95,18 +89,23 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+
+def _determine_sat_hidden_pseudorange(args: argparse.Namespace, prn_num: int) -> None:
+    global _hidden_pseudoranges
+
+    # Calculate a noisy pseudorange in meters from our _actual_ receiver position to the satellite
+    computed_pseudorange: float = compute_pseudorange_from_receiver_to_svn_meters(prn_num,
+                                                                                  args.ionosphere_delay_seconds,
+                                                                                  args.troposphere_delay_seconds)
+
+    _hidden_pseudoranges[prn_num] = computed_pseudorange
+    _logger.info(f"Set hidden pseudorange for PRN {prn_num:02d} to {_hidden_pseudoranges[prn_num]:,.02f} m")
+
+
 def _svn_prn_stream(args: argparse.Namespace,
                     svn_num: int,
                     gold_code: numpy.typing.NDArray[numpy.int8]) -> numpy.typing.NDArray[numpy.int8]:
 
-    global _hidden_pseudoranges
-
-    # Calculate a noisy pseudorange in meters from our _actual_ receiver position to the satellite
-    computed_pseudorange: float = compute_pseudorange_from_receiver_to_svn_meters(svn_num,
-                                                                                  args.ionosphere_delay_seconds,
-                                                                                  args.troposphere_delay_seconds)
-
-    _hidden_pseudoranges[svn_num] = computed_pseudorange
 
     full_over_the_air_transmission_delay_seconds: float = _hidden_pseudoranges[svn_num] / SPEED_OF_LIGHT_M_PER_S
     # _logger.debug(f"OTA delay for SVN {svn_num:02d}: {full_over_the_air_transmission_delay_seconds:5.03f} s")
@@ -147,10 +146,10 @@ def _pseudorange_by_received_prn_stream_bits(args: argparse.Namespace,
     return bits_shifted_to_align
 
 
-def _lnav_data_bit_sync_offset(args: argparse.Namespace, prn_num: int, sim_prn_start_offset: float) -> None:
-    global simulation_current_gps_time_at_receiver
+def _establish_bit_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime,
+                        prn_num: int, prn_sync_offset: float) -> None:
 
-    _logger.debug(f"Starting function to establish LNAV data bit sync")
+    _logger.debug(f"Starting to establish bit sync")
 
     satellite_pseudorange_meters: float = _hidden_pseudoranges[prn_num]
 
@@ -159,44 +158,21 @@ def _lnav_data_bit_sync_offset(args: argparse.Namespace, prn_num: int, sim_prn_s
 
     transmission_delay_offset_chips: int = math.ceil( (1_023 * 1_000) * full_over_the_air_transmission_delay_seconds)
 
-    # Shift that to GPS satellite time reference
-    sat_abs_time: datetime.datetime = simulation_current_gps_time_at_receiver - datetime.timedelta(
-        seconds=full_over_the_air_transmission_delay_seconds)
-
-    sim_relative_time: float = (simulation_current_gps_time_at_receiver -
-                                simulation_start_gps_time_at_receiver).total_seconds()
-
-    _logger.debug(f"Sim absolute time: {simulation_current_gps_time_at_receiver.isoformat(sep=" ", 
-                                                                                        timespec="microseconds")}")
-    _logger.debug(f"Sim relative time: {sim_relative_time:.06f} s")
-
-    _logger.debug(f"Sat absolute time: {sat_abs_time.isoformat(sep=" ", timespec="microseconds")}")
-
-    # Compute sat delta to next 20ms interval (when LNAV bits start)
-    current_second_us: int = (sat_abs_time.minute * 60 * 1_000_000) + (sat_abs_time.second * 1_000_000) + \
-                                    sat_abs_time.microsecond
+    # Compute sat delta to next 20ms interval (time instants when LNAV bits start)
+    sv_clock: sim_time.SimTime.UserClock = sim_engine.user_clock("prn02_absolute_gps")
+    sv_abs_time: datetime.datetime = sv_clock.time_current()
+    current_second_us: int = (sv_abs_time.minute * 60 * 1_000_000) + (sv_abs_time.second * 1_000_000) + \
+                              sv_abs_time.microsecond
 
     # Calculate microseconds needed to reach the next 20ms interval
     interval_us: int = 20_000
     remainder_us: int = current_second_us % interval_us
-    difference_us: int = interval_us - remainder_us
+    delay_to_next_bit_start: datetime.timedelta = datetime.timedelta(microseconds=interval_us - remainder_us)
 
-    # Advance all sim times in lockstep
-    clock_step: datetime.timedelta = datetime.timedelta(microseconds=difference_us)
-    fractional_second_clock_step: float = float(clock_step.microseconds) / MICROSECONDS_PER_SECOND
-    _logger.info(f"Advancing all simulation times by {fractional_second_clock_step:.06f} s "
-                   f"to get to next sat LNAV bit boundary time of {(sat_abs_time + clock_step).isoformat(
-                       sep=" ", timespec="microseconds")} (GPS)")
+    # Advance sim time to start of next bit
+    sim_engine.advance_sim_time(delay_to_next_bit_start)
 
-    sat_abs_time += clock_step
-    sim_relative_time += fractional_second_clock_step
-    simulation_current_gps_time_at_receiver += clock_step
-
-
-    _logger.debug(f"Sim absolute time: {simulation_current_gps_time_at_receiver.isoformat(sep=" ", 
-                                                                                        timespec="microseconds")}")
-    _logger.debug(f"Sim relative time: {sim_relative_time:.06f} s")
-    _logger.debug(f"Sat absolute time: {sat_abs_time.isoformat(sep=" ", timespec="microseconds")}")
+    raise NotImplementedError("Stop")
 
     simulated_number_of_lnav_data_bits_until_edge_seen: int = random.randint(0, 3)
 
@@ -314,75 +290,109 @@ def _read_time_of_week(args: argparse.Namespace, prn_num: int) -> datetime.datet
 	        
 	    21,409,507.6 / speed of light is 0.71414 seconds
 	    
-	    Once we read out the preawmble and then back calculate to the time of the start of the preamble,
+	    Once we read out the preamble and then back calculate to the time of the start of the preamble,
 	        that gives us 6.071414 seconds
 	        
 	    Take the fractional second out of the preamble and somehow we have a pseudorange
 	    
 	    This is black magic of the highest sort
 	"""
-	    
+
+
+def _add_sat_clock_to_sim(sim_engine: sim_time.SimTime, prn_num: int) -> None:
+    ota_delay: float = _hidden_pseudoranges[prn_num] / SPEED_OF_LIGHT_M_PER_S
+
+    sv_time_absolute_gps: datetime.datetime = sim_engine.user_clock("receiver_time_absolute_gps").time_current() - \
+        datetime.timedelta(seconds=ota_delay)
+
+    sim_engine.add_user_clock(
+        sim_time.SimTime.UserClock(f"prn{prn_num:02d}_absolute_gps", sv_time_absolute_gps,
+                                   logging_level=logging.DEBUG
+        )
+    )
+
+
+def _establish_prn_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime, prn_num: int,
+                        fix_svn_prns: dict[int, numpy.typing.NDArray[numpy.int8]]) -> float:
+    _logger.debug(f"Starting PRN sync establishment for SV with PRN {prn_num:02d}")
+    time_for_prn_sync_seconds: float = 0.001
+    sim_engine.advance_sim_time(datetime.timedelta(seconds=time_for_prn_sync_seconds))
+
+    pseudorange_in_bits_per_svn: dict[int, int] = {}
+    pseudorange_in_bits: int = _pseudorange_by_received_prn_stream_bits(args, prn_num, fix_svn_prns[prn_num])
+    pseudorange_in_bits_per_svn[prn_num] = pseudorange_in_bits
+
+    sim_prn_start_offset: float = pseudorange_in_bits_per_svn[prn_num] / CA_CODE_CHIPPING_RATE
+    print(f"\t\t\tSub-millisecond portion of pseudorange to SV with PRN {prn_num:02} : "
+          f"{sim_prn_start_offset:.06f} s")
+
+    print("\t\t\tSim time elapsed at moment PRN sync is established: "
+          f"{sim_time.SimTime.timedelta_isoformat(sim_engine.user_clock(
+              "receiver_time_absolute_gps").time_elapsed())} s")
+
+    _logger.info(f"PRN sync successfully established for SV with PRN {prn_num:02d}, "
+                f"time offset = {sim_prn_start_offset:.06f} s")
+
+    return sim_prn_start_offset
+
 
 def _main() -> None:
     global simulation_current_gps_time_at_receiver
 
     args: argparse.Namespace = _parse_args()
 
-    print()
-
     # Populate the gold codes for the satellites we're simulating a lock to
+    print()
     print("Generating GPS Gold codes for satellites we are going to use in our position fix")
     gold_codes: gps_gold_codes.GPSGoldCodes = gps_gold_codes.GPSGoldCodes()
     fix_svn_prns: dict[int, numpy.typing.NDArray[numpy.int8]] = {}
-    for svn_num in (2, 7, 13, 19):
-        fix_svn_prns[svn_num] = gold_codes.gold_code(svn_num)
+    for prn_num in (2, 7, 13, 19):
+        fix_svn_prns[prn_num] = gold_codes.gold_code(prn_num)
     print("\tDone!")
+
+    # Create sim engine with all user clocks
+    sim_engine: sim_time.SimTime = sim_time.SimTime(
+        logging_level=logging.DEBUG
+    )
+    receiver_time_absolute_gps: datetime.datetime = datetime.datetime.fromisoformat("2026-06-01T00:00:01.000000")
+    sim_engine.add_user_clock(
+        sim_time.SimTime.UserClock("receiver_time_absolute_gps", receiver_time_absolute_gps,
+                                   logging_level=logging.DEBUG
+        )
+    )
+
 
     print()
     print("Calculating pseudoranges for all satellites in the fix")
 
-    for svn_num in (2, 7, 13, 19):
+    for prn_num in [2, 7, 13, 19]:
 
         print()
-        print(f"\tPseudoranging to SVN {svn_num:02}")
+        print(f"\tStarting processing for SV with PRN {prn_num:02}")
 
-        print(f"\n\t\t*** Simulation *GPS* time at receiver: "
-              f"{simulation_current_gps_time_at_receiver.isoformat(sep=" ", timespec="microseconds")} ***")
+        _determine_sat_hidden_pseudorange(args, prn_num)
+        _add_sat_clock_to_sim(sim_engine, prn_num)
 
         print()
-        print(f"\t\tEstablishing local clock offset to PRN {svn_num:02} L1 C/A signal (PRN code alignment)")
-        pseudorange_in_bits_per_svn: dict[int, int] = {}
+        print(f"\t\tStep 01: PRN Gold code sync")
+        prn_sync_offset: float = _establish_prn_sync(args, sim_engine, prn_num, fix_svn_prns)
 
-        pseudorange_in_bits: int = _pseudorange_by_received_prn_stream_bits(args, svn_num, fix_svn_prns[svn_num])
-        pseudorange_in_bits_per_svn[svn_num] = pseudorange_in_bits
-
-        time_for_prn_sync_seconds: float = 0.001
-        simulation_current_gps_time_at_receiver += datetime.timedelta(seconds=time_for_prn_sync_seconds)
-        print(f"\t\t\tSim time when PRN {svn_num:02d} sync was established       : 0.001000 s")
-        sim_prn_start_offset: float = pseudorange_in_bits_per_svn[svn_num] / CA_CODE_CHIPPING_RATE
-        print(f"\t\t\tSim time sub-millisecond offset when PRN starts : "
-              f"{sim_prn_start_offset:.06f} s")
-
-        print(f"\n\t\t*** Simulation *GPS* time at receiver: "
-              f"{simulation_current_gps_time_at_receiver.isoformat(sep=" ", timespec="microseconds")} ***")
-
-        # Now we have locked sync on the most fundamental signal, now establish sync to start of each
-        #   bit of the LNAV message, so we can start to read LNAV messages.
+        # Now we have locked sync on the most fundamental signal, now establish bit sync to LNAV message
+        #   data stream so we can start to read LNAV messages.
         #
-        # We needed C/A code alignment as a prereq as it tells us time window when LNAV data bit flips *may*
+        # We needed C/PRN as a prereq as it tells us precise time windows to watch when LNAV data bit flips *may*
         #   happen (every 20 repetitions of full C/A PRN, e.g. 0.020 s)
         print()
-        print(f"\t\tEstablishing time alignment with the exact start of each data bit in PRN {svn_num:02d} LNAV messages "
-               "(\"bit sync\")")
-        _lnav_data_bit_sync_offset(args, svn_num, sim_prn_start_offset)
+        print(f"\t\tStep 02: bit sync")
+        _establish_bit_sync(args, sim_engine, prn_num, prn_sync_offset)
 
         sim_time_offsets_lnav_bit_starts: list[float] = _get_sim_time_offsets_lnav_bit_starts()
 
         print(f"\t\t\tSim time sub-second offsets of LNAV bit starts: {sim_time_offsets_lnav_bit_starts[0]:8.06f} s "
               "+ integer multiples of 0.020 s (20 ms)")
 
-        print(f"\n\t\t*** Simulation *GPS* time at receiver: "
-              f"{simulation_current_gps_time_at_receiver.isoformat(sep=" ", timespec="microseconds")} ***")
+        raise NotImplementedError("Stop")
+
 
         print()
         print("\t\tReading Time Of Week (TOW) data")

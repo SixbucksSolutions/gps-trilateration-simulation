@@ -75,7 +75,18 @@ class SimTime:
                              f"{user_clock.time_current().isoformat(sep=" ", timespec="microseconds")}")
 
 
-    def advance_sim_time(self: typing.Self, time_delta: datetime.timedelta) -> None:
+    def advance_sim_time(self: typing.Self, time_shift: datetime.timedelta | float) -> None:
+        time_delta: datetime.timedelta
+
+        if isinstance(time_shift, float):
+            time_delta = datetime.timedelta(seconds=time_shift)
+        elif isinstance(time_shift, datetime.timedelta):
+            time_delta = time_shift
+        else:
+            raise ValueError("Shift must be of type datetime.timedelta or float")
+
+        SimTime._logger.debug(f"Sim engine starting time advance of {SimTime.timedelta_isoformat(time_delta)} s")
+
         if time_delta < SimTime._zero_delta:
             raise ValueError("Tried to move time backwards")
 
@@ -89,7 +100,7 @@ class SimTime:
         for curr_clock in self._user_clocks.values():
             curr_clock.advance_clock(time_delta)
 
-        SimTime._logger.info(f"Advanced simulation time by {SimTime.timedelta_isoformat(time_delta)} s")
+        SimTime._logger.info(f"Sim engine completed time advance of {SimTime.timedelta_isoformat(time_delta)} s")
 
 
     def user_clock(self: typing.Self, clock_name: str) -> UserClock:
