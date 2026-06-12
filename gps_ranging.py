@@ -146,8 +146,7 @@ def _pseudorange_by_received_prn_stream_bits(args: argparse.Namespace,
     return bits_shifted_to_align
 
 
-def _establish_bit_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime,
-                        prn_num: int, prn_sync_offset: float) -> None:
+def _establish_bit_sync(sim_engine: sim_time.SimTime, prn_num: int) -> None:
 
     _logger.debug(f"Starting to establish bit sync")
 
@@ -181,77 +180,20 @@ def _establish_bit_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime,
     )
     sim_engine.advance_sim_time(delay_to_next_bit_transition_edge)
 
-    raise NotImplementedError("Stop")
-
-    simulated_number_of_lnav_data_bits_until_edge_seen: int = random.randint(0, 3)
-
-    if simulated_number_of_lnav_data_bits_until_edge_seen > 0:
-        _logger.debug(f"Simulating that it takes {simulated_number_of_lnav_data_bits_until_edge_seen} "
-                      "LNAV data bits until we see a (0 <-> 1) transition")
-        clock_step: datetime.timedelta = datetime.timedelta(
-            milliseconds=simulated_number_of_lnav_data_bits_until_edge_seen * 20)
-        fractional_second_clock_step = float(clock_step.microseconds) / MICROSECONDS_PER_SECOND
-        _logger.info(f"Advancing all simulation times by {fractional_second_clock_step:.06f} s to "
-                     f"{(sat_abs_time + clock_step).isoformat(sep=" ", timespec="microseconds")} (GPS) "
-                      "where the first LNAV message bit transition edge occurs")
-
-        sat_abs_time += clock_step
-        sim_relative_time += fractional_second_clock_step
-        simulation_current_gps_time_at_receiver += clock_step
+    print("\t\t\tReceiver's _relative_ time from cold start at the exact moment bit sync is established: "
+          f"{sim_time.SimTime.timedelta_isoformat(sim_engine.user_clock(
+              "receiver_time_absolute_gps").time_elapsed())} s")
 
 
-        _logger.debug(f"Sim absolute time: {simulation_current_gps_time_at_receiver.isoformat(sep=" ", 
-                                                                                            timespec="microseconds")}")
-        _logger.debug(f"Sim relative time: {sim_relative_time:.06f} s")
-        _logger.debug(f"Sat absolute time: {sat_abs_time.isoformat(sep=" ", timespec="microseconds")}")
 
-    else:
-        _logger.debug(f"PRNG gave us a bit transition the first time we checked, no need to keep looking")
+def _establish_subframe_sync(sim_engine: sim_time.SimTime, prn_num: int) -> None:
+    _logger.debug(f"Starting subframe sync with SV with PRN {prn_num:02d}")
 
-
-def _get_sim_time_offsets_lnav_bit_starts() -> list[float]:
-    curr_sim_time_bit_start: float = (simulation_current_gps_time_at_receiver -
-                                      simulation_start_gps_time_at_receiver).total_seconds()
-
-    while curr_sim_time_bit_start > 0.020:
-        curr_sim_time_bit_start -= 0.020
-
-    bit_start_offsets: list[float] = [
-        curr_sim_time_bit_start,
-    ]
-
-    while (curr_sim_time_bit_start := curr_sim_time_bit_start + 0.020) < 1.0:
-        bit_start_offsets.append(curr_sim_time_bit_start)
-
-    return bit_start_offsets
-
-
-def _read_time_of_week(args: argparse.Namespace, prn_num: int) -> datetime.datetime:
-    global simulation_current_gps_time_at_receiver
-    _logger.info("Starting search for time of week")
-
-    sim_relative_time: float = (simulation_current_gps_time_at_receiver -
-                                simulation_start_gps_time_at_receiver).total_seconds()
-
-    _logger.debug(f"Sim time at entry               : {sim_relative_time:.06f} s")
-
-    _logger.debug(f"Receiver absolute time at entry : {simulation_current_gps_time_at_receiver.isoformat(
-        sep=" ", timespec="microseconds")} (GPS)")
-
-    satellite_pseudorange_meters: float = _hidden_pseudoranges[prn_num]
-
-    # Full transmission delay
-    full_over_the_air_transmission_delay_seconds: float = _hidden_pseudoranges[prn_num] / SPEED_OF_LIGHT_M_PER_S
-
-    # compute satellite time when bits were being sent
-    sat_gps_time: datetime.datetime = simulation_current_gps_time_at_receiver - datetime.timedelta(
-        seconds=full_over_the_air_transmission_delay_seconds)
-
-    _logger.debug(f"Satellite time at entry         : {sat_gps_time.isoformat(sep=" ", timespec="microseconds")} (GPS)")
-
-    print("\t\t\tThe LNAV preamble is sent on a six second interval"
-          "\n\t\t\tThe edge of the first bit of LNAV preamble is sent *exactly* at the GPS second boundary from sat"
+    print("\t\t\tThe LNAV preamble is sent every six seconds"
+          "\n\t\t\tThe edge of the first bit of LNAV preamble is sent *exactly* on GPS second boundaries from sat"
           "\n\t\t\t\tframe of reference")
+
+    raise NotImplementedError("Halt or I shall yell halt a second time!")
 
     # That means the next preamble starts at the next six-second interval
 
@@ -324,6 +266,8 @@ def _add_sat_clock_to_sim(sim_engine: sim_time.SimTime, prn_num: int) -> None:
 def _establish_prn_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime, prn_num: int,
                         fix_svn_prns: dict[int, numpy.typing.NDArray[numpy.int8]]) -> float:
     _logger.debug(f"Starting PRN sync establishment for SV with PRN {prn_num:02d}")
+
+    _logger.info("Advancing time 1 ms to listen to complete PRN loop so we can find sync offset")
     time_for_prn_sync_seconds: float = 0.001
     sim_engine.advance_sim_time(datetime.timedelta(seconds=time_for_prn_sync_seconds))
 
@@ -335,12 +279,15 @@ def _establish_prn_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime, 
     print(f"\t\t\tSub-millisecond portion of pseudorange to SV with PRN {prn_num:02} : "
           f"{sim_prn_start_offset:.06f} s")
 
-    print("\t\t\tSim time elapsed at moment PRN sync is established: "
+    _logger.info(f"Advancing time by {sim_prn_start_offset:.06f} s which is the exact moment PRN sync is established")
+    sim_engine.advance_sim_time(sim_prn_start_offset)
+
+    print("\t\t\tReceiver's _relative_ time from cold start at moment PRN sync is established: "
           f"{sim_time.SimTime.timedelta_isoformat(sim_engine.user_clock(
               "receiver_time_absolute_gps").time_elapsed())} s")
 
-    _logger.info(f"PRN sync successfully established for SV with PRN {prn_num:02d}, "
-                f"time offset = {sim_prn_start_offset:.06f} s")
+    _logger.info(f"PRN sync successfully established for SV with PRN {prn_num:02d}")
+    _logger.info(f"1 ms timer set which fires every time the antenna receives the start of a new PRN loop")
 
     return sim_prn_start_offset
 
@@ -383,22 +330,22 @@ def _main() -> None:
         _add_sat_clock_to_sim(sim_engine, prn_num)
 
         print()
-        print(f"\t\tStep 01: PRN Gold code sync")
-        prn_sync_offset: float = _establish_prn_sync(args, sim_engine, prn_num, fix_svn_prns)
+        print(f"\t\tStep 01: PRN Gold code sync (1 ms period)")
+        _establish_prn_sync(args, sim_engine, prn_num, fix_svn_prns)
 
-        # Now we have locked sync on the most fundamental signal, now establish bit sync to LNAV message
+        # Now we have locked sync on the most fundamental signal, now establish bit sync with LNAV message
         #   data stream so we can start to read LNAV messages.
         #
-        # We needed C/PRN as a prereq as it tells us precise time windows to watch when LNAV data bit flips *may*
-        #   happen (every 20 repetitions of full C/A PRN, e.g. 0.020 s)
+        # We needed PRN sync as a prereq as that 1 ms timer tells the receiver precise time windows to watch
+        #   when LNAV data bit flips *may* happen (every 20 ms on PRN loop boundaries)
         print()
-        print(f"\t\tStep 02: bit sync")
-        _establish_bit_sync(args, sim_engine, prn_num, prn_sync_offset)
+        print(f"\t\tStep 02: bit sync (20 ms period)")
+        _establish_bit_sync(sim_engine, prn_num)
 
-        sim_time_offsets_lnav_bit_starts: list[float] = _get_sim_time_offsets_lnav_bit_starts()
-
-        print(f"\t\t\tSim time sub-second offsets of LNAV bit starts: {sim_time_offsets_lnav_bit_starts[0]:8.06f} s "
-              "+ integer multiples of 0.020 s (20 ms)")
+        # Now we have locked *both* PRN sync AND bit sync, we can start to watch bits to spot the subframe preamble
+        print()
+        print(f"\t\tStep 03: subframe sync (6 second period)")
+        _establish_subframe_sync(sim_engine, prn_num)
 
         raise NotImplementedError("Stop")
 
