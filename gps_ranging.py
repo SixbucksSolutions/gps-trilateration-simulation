@@ -170,7 +170,7 @@ def _establish_bit_sync(sim_engine: sim_time.SimTime, prn_num: int) -> None:
     # Advance sim time to first data bit transition edge we see in this sim run at which time we have
     #   achieved bit sync
     _logger.info(
-        f"Bit sync: advancing clock {sim_time.SimTime.timedelta_isoformat(delay_to_next_bit_transition_edge)} s "
+        f"Bit sync: advancing clock {sim_time.timedelta_str(delay_to_next_bit_transition_edge)} s "
          "as it's when bit sync is established (receiver sees its first (0 <-> 1) transition edge at a data bit boundary"
     )
     sim_engine.advance_sim_time(delay_to_next_bit_transition_edge)
@@ -181,12 +181,12 @@ def _establish_bit_sync(sim_engine: sim_time.SimTime, prn_num: int) -> None:
     cumulative_time_to_establish_bit_sync: datetime.timedelta = bit_sync_operation_end - bit_sync_operation_start
 
     print( "\t\t\tEstablishing bit sync took "
-          f"{sim_time.SimTime.timedelta_isoformat(cumulative_time_to_establish_bit_sync)} s")
+          f"{sim_time.timedelta_str(cumulative_time_to_establish_bit_sync)} s")
 
     print("\t\t\tStarting 20 ms timer to signal when every new nav message bit first hits the receiver antenna")
 
     print("\t\t\tTime from receiver cold start through established bit sync: "
-          f"{sim_time.SimTime.timedelta_isoformat(sim_engine.user_clock(
+          f"{sim_time.timedelta_str(sim_engine.user_clock(
               "receiver_time_absolute_gps").time_elapsed())} s")
 
 
@@ -350,7 +350,7 @@ def _establish_prn_sync(args: argparse.Namespace, sim_engine: sim_time.SimTime, 
     sim_engine.advance_sim_time(sim_prn_start_offset)
 
     print("\t\t\tEstablishing PRN sync took "
-          f"{sim_time.SimTime.timedelta_isoformat(sim_engine.user_clock(
+          f"{sim_time.timedelta_str(sim_engine.user_clock(
               "receiver_time_absolute_gps").time_elapsed())} s")
     print("\t\t\tStarting 1 ms timer to signal each precise time the PRN Gold code for this SV restarts at the antenna")
 

@@ -3,6 +3,13 @@ import logging
 import typing
 
 
+def timedelta_str(time_delta: datetime.timedelta) -> str:
+    total_seconds: int = time_delta.seconds
+    microseconds: int = time_delta.microseconds
+
+    return f"{total_seconds}.{microseconds:06d}"
+
+
 class SimTimer:
     def __init__(self: typing.Self,
                  timer_name: str,
@@ -16,7 +23,7 @@ class SimTimer:
 
     def advance_time(self: typing.Self, advance_amount: datetime.timedelta) -> None:
         self._time_elapsed += advance_amount
-        self._logger.debug(f"Timer advanced by {SimTime.timedelta_isoformat(advance_amount)} s, "
+        self._logger.debug(f"Timer advanced by {timedelta_str(advance_amount)} s, "
                            f"now at {self._time_elapsed.total_seconds():.06f} s")
 
 
@@ -51,7 +58,7 @@ class SimClock:
 
     def advance_time(self: typing.Self, advance_amount: datetime.timedelta) -> None:
         self._time_current += advance_amount
-        self._logger.debug(f"Clock advanced by {SimTime.timedelta_isoformat(advance_amount)} s, "
+        self._logger.debug(f"Clock advanced by {timedelta_str(advance_amount)} s, "
                            f"now at {self._time_current.isoformat(sep=" ", timespec="microseconds")}")
 
 
@@ -73,11 +80,6 @@ class SimTime:
 
 
     @classmethod
-    def timedelta_isoformat(cls, time_delta: datetime.timedelta) -> str:
-        total_seconds: int = time_delta.seconds
-        microseconds: int = time_delta.microseconds
-
-        return f"{total_seconds}.{microseconds:06d}"
 
 
     def __init__(self: typing.Self, logging_level: int = logging.WARNING) -> None:
@@ -114,7 +116,7 @@ class SimTime:
         else:
             raise ValueError("Shift must be of type datetime.timedelta or float")
 
-        SimTime._logger.debug(f"Sim engine starting time advance of {SimTime.timedelta_isoformat(time_delta)} s")
+        SimTime._logger.debug(f"Sim engine starting time advance of {timedelta_str(time_delta)} s")
 
         if time_delta < SimTime._zero_delta:
             raise ValueError("Tried to move time backwards")
@@ -131,7 +133,7 @@ class SimTime:
         for curr_timer in self._user_timers.values():
             curr_timer.advance_time(time_delta)
 
-        SimTime._logger.info(f"Sim engine completed time advance of {SimTime.timedelta_isoformat(time_delta)} s")
+        SimTime._logger.info(f"Sim engine completed time advance of {timedelta_str(time_delta)} s")
 
 
     def user_clock(self: typing.Self, clock_name: str) -> SimClock:
@@ -167,7 +169,7 @@ if __name__ == "__main__":
 
         print("\tUser Timers:")
         for name, timer in sorted(timers_to_print.items()):
-            print(f"\t\t{name:26} : "
+            print(f"\t\t{name:26} :            "
                   f"{timer.value().isoformat(timespec="microseconds")}")
 
     logging.basicConfig()
@@ -182,7 +184,7 @@ if __name__ == "__main__":
         )
     )
 
-    receiver_time_absolute_gps: datetime.datetime = datetime.datetime.fromisoformat("2026-06-01T00:00:01.100000")
+    receiver_time_absolute_gps: datetime.datetime = datetime.datetime.fromisoformat("2026-06-01T00:00:01.000000")
     sim_engine.add_user_clock(
         SimClock("receiver_time_absolute_gps", receiver_time_absolute_gps,
             # logging_level=logging.DEBUG
@@ -202,7 +204,7 @@ if __name__ == "__main__":
 
     time_to_advance: datetime.timedelta = datetime.timedelta(seconds=5.071414)
     sim_engine.advance_sim_time(time_to_advance)
-    print(f"\nAdvanced sim time by {SimTime.timedelta_isoformat(time_to_advance)} s")
+    print(f"\nAdvanced sim time by {timedelta_str(time_to_advance)} s")
 
     print()
     print("Tickers after time advance:")
@@ -212,4 +214,4 @@ if __name__ == "__main__":
     print("Elapsed time reported by all user clocks:")
     for clock_name, user_clock in sorted(sim_engine.user_clocks().items()):
         print(f"\t{clock_name:26} : "
-              f"{SimTime.timedelta_isoformat(user_clock.time_elapsed()):>13} s")
+              f"{timedelta_str(user_clock.time_elapsed()):>13} s")
