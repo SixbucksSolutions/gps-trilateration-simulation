@@ -429,11 +429,15 @@ def _main() -> None:
         print(f"\t\tStep 03: subframe sync (6 second period)")
         gps_time_of_week_seconds_at_sv: int = _establish_subframe_sync(sim_engine, prn_num)
 
-        print( "\t\t\tGPS time of week at our SV at this *exact moment*: "
-              f"{gps_time_of_week_seconds_at_sv:,}.000000000 seconds")
+        print()
+        print(f"\t\tStep 04: receiver creates a (local time, GPS time) correlation tuple")
+        print( "\t\t\tReceiver creates ("
+              f"\n\t\t\t\trelative local clock =       0.000000000 seconds, "
+              f"\n\t\t\t\tGPS time             = {gps_time_of_week_seconds_at_sv:7,}.000000000 seconds\n\t\t\t) "
+               "tuple which gives it a way to estimate SV's GPS time based on delta from local clock" )
 
         print()
-        print("\t\tCalculating pseudorange now that we have TOW + time since TOW + fractional offset")
+        print("\t\tCalculating pseudorange now that we have TOW + time since TOW + sub-millisecond offset")
         print("\t\t\tDone!")
 
         break
